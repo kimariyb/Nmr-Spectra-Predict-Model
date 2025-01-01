@@ -4,6 +4,8 @@ import torch.nn.functional as F
 import torch.nn.modules.batchnorm as batchnorm
 import torch_geometric.nn as geo_nn
 
+from collections import OrderedDict
+
 
 class NodeLevelBatchNorm(batchnorm._BatchNorm):
     r"""
@@ -76,59 +78,92 @@ class GraphConvBatchNorm(nn.Module):
         
         return x
     
-# TODO: Implement the DenseLayer class
+
 class DenseLayer(nn.Module):
     def __init__(
         self, 
-        in_channels, 
-        out_channels
+        num_input_features: int, 
+        growth_rate: int = 32,
+        batch_size: int = 4
     ):
         super(DenseLayer, self).__init__()
-        self.conv = GraphConvBatchNorm(in_channels, out_channels)
+        self.conv1 = GraphConvBatchNorm(num_input_features, int(growth_rate * batch_size))
+        self.conv2 = GraphConvBatchNorm(int(growth_rate * batch_size), growth_rate)
         
-    def forward(self, x, edge_index):
-        x = self.conv(x, edge_index)
+    def batch_func(self, x):
+        concat_features = torch.cat(x, 1)
+        concat_features = self.conv1(concat_features)
         
-        return x
-    
-# TODO: Implement the DenseBlock class
-class DenseBlock(nn.Module):
-    def __init__(
-        self, 
-        in_channels, 
-        out_channels, 
-        num_layers
-    ):
-        super(DenseBlock, self).__init__()
-        self.layers = nn.ModuleList([
-            DenseLayer(in_channels, out_channels)
-            for _ in range(num_layers)
-        ])
+        return concat_features
         
-    def forward(self, x, edge_index):
-        for layer in self.layers:
-            x = layer(x, edge_index)
-            
+    def forward(self, x):
+        if isinstance(x, torch.Tensor):
+            x = [x]
+        
+        x = self.batch_func(x)
+        x = self.conv2(x)
+        
         return x
     
 
-# TODO: Implement the GraphDenseNet class
+class DenseBlock(nn.ModuleDict):
+    def __init__(
+        self, 
+        num_layers: int, 
+        num_input_features: int, 
+        growth_rate: int = 32,
+        batch_size: int = 4
+    ):
+        super(DenseBlock, self).__init__()
+        for i in range(num_layers):
+            layer = DenseLayer(num_input_features + i * growth_rate, growth_rate, batch_size)
+            self.add_module('layer%d' % (i + 1), layer)
+        
+    def forward(self, x):
+        features = [x]
+        for name, layer in self.items():
+            x = layer(x)
+            features.append(x)
+            x = features
+            
+        x = torch.cat(x, 1)
+                        
+        return x
+    
+
 class GraphDenseNet(nn.Module):
     def __init__(
         self, 
-        in_channels, 
-        out_channels, 
-        num_layers, 
-        num_blocks
+        num_input_features: int = 32, 
+        growth_rate: int = 32, 
+        block_config: tuple = (3, 3, 3, 3),
+        batch_sizes: list = [2, 3, 4, 4],
+        out_channels: int = 1
     ):
         super(GraphDenseNet, self).__init__()
-        self.blocks = nn.ModuleList([
-            DenseBlock(in_channels, out_channels, num_layers)
-            for _ in range(num_blocks)
-        ])
+        self.features = nn.Sequential(
+            OrderedDict([
+                'conv0', GraphConvBatchNorm(num_input_features, 32)
+            ])
+        )
+        
+        for i, num_layers in enumerate(block_config):
+            block = DenseBlock(
+                num_layers, num_input_features, growth_rate, batch_sizes[i]
+            )
+            self.features.add_module('block%d' % (i + 1), block)
+            num_input_features += int(num_layers * growth_rate)
+            
+            bn = GraphConvBatchNorm(num_input_features, num_input_features // 2)
+            self.features.add_module("transition%d" % (i + 1), bn)
+            num_input_features = num_input_features // 2
+            
+        self.classifer = nn.Linear(num_input_features, out_channels)
+            
         
     def forward(self, x, edge_index):
-        for block in self.blocks:
-            x = block(x, edge_index)
+        x = self.features(x, edge_index)
+        x = geo_nn.global_mean_pool(x, torch.zeros(x.shape[0], dtype=torch.long))
+        x = self.classifer(x)
             
         return x

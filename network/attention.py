@@ -24,7 +24,7 @@ class AttentionBlock(nn.Module):
         self.v = nn.Linear(hidden_dim, hidden_dim)
         
         self.ffn = nn.Linear(hidden_dim, hidden_dim)
-        self.dropout = nn.Dropout(0.5)
+        self.dropout = nn.Dropout(0.1)
         self.scale = torch.sqrt(torch.FloatTensor([hidden_dim // num_heads]))
         
     def forward(self, query, key, value, mask):
@@ -60,17 +60,23 @@ class AttentionBlock(nn.Module):
         
         return weight
     
-# TODO: Implement the CrossAttentionBlock class
+    
 class CrossAttentionBlock(nn.Module):
     def __init__(
         self, 
-        hidden_dim, 
-        num_heads,
+        filter_channels: int = 32,
+        hidden_dim: int = 96, 
+        num_heads: int = 1,
     ):
         super(CrossAttentionBlock, self).__init__()
         self.fp_encoder = FingerPrintBlock()
         self.smi_encoder = SmilesConvBlock()
-        self.graph_encoder = GraphDenseNet()
+        self.graph_encoder = GraphDenseNet(
+            num_input_features=40, 
+            growth_rate=filter_channels * 3,
+            block_config=[8, 8, 8],
+            batch_sizes=[2, 2, 2]
+        )
         
         self.attention = AttentionBlock(hidden_dim, num_heads)
         
@@ -91,9 +97,11 @@ class CrossAttentionBlock(nn.Module):
         fp = self.fp_encoder(fp)
         smi = self.smi_encoder(smi)
         graph = self.graph_encoder(graph)
+
+        smi_x = smi + self.attention(fp, smi, smi)
+        fp_x1 = fp + self.attention(smi, fp, fp)
         
-        fp = self.attention(fp, fp, fp)
-        smi = self.attention(smi, smi, smi)
-        graph = self.attention(graph, graph, graph)
+        graph_x = graph + self.attention(fp, graph, graph)
+        fp_x2 = fp + self.attention(graph, fp, fp)
         
-        return fp, smi, graph
+        return graph_x, fp_x2, smi_x, fp_x1

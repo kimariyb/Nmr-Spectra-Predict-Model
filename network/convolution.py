@@ -6,9 +6,9 @@ import torch.nn.functional as F
 class FingerPrintBlock(nn.Module):
     def __init__(
         self, 
-        in_channels, 
-        mid_channels,
-        out_channels
+        in_channels: int = 1489, 
+        mid_channels: int = 512,
+        out_channels: int = 96
     ):
         super(FingerPrintBlock, self).__init__()
         self.linear1 = nn.Linear(in_channels, mid_channels)
@@ -50,9 +50,9 @@ class SqueezeExcitationBlock(nn.Module):
 class SmilesConvBlock(nn.Module):
     def __init__(
         self, 
-        embedding_dim, 
-        filter_channels,
-        out_channels, 
+        embedding_dim: int = 128, 
+        filter_channels: int = 32,
+        out_channels: int = 96, 
     ):
         super(SmilesConvBlock, self).__init__()
 
