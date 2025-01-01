@@ -2,19 +2,20 @@
 
 import os
 import torch
-import numpy as np
-import pandas as pd
 
+from rdkit import Chem
+from rdkit import RDLogger
 from tqdm import tqdm
 from torch_geometric.data import Data, InMemoryDataset
 
-from rdkit import Chem
-from rdkit.Chem import AllChem
-from rdkit.Chem.BRICS import FindBRICSBonds
-from rdkit.Chem.Scaffolds import MurckoScaffold
-from rdkit import RDLogger
+from utils.dataset import (
+    ExtractCarbonShift, 
+    MolToGraph, 
+    MolToFingerprints, 
+    GenerateSequentialSmiles,
+    GernerateCarbonMask
+)
 
-from utils.dataset import ExtractCarbonShift, MolToGraph
 
 # Disable rdkit warnings
 RDLogger.DisableLog('rdApp.*')
@@ -53,7 +54,46 @@ class CarbonSpectraDataset(InMemoryDataset):
         return os.path.join(self.root,'processed')
     
     def process(self):
-        ...
+        # 读取原始数据
+        suppl = Chem.SDMolSupplier(
+            os.path.join(self.raw_dir, self.raw_file_names),
+            removeHs = False,
+            sanitize = True
+        )
         
-    def mol2graph(self, mol):
-        ...
+        data_list = []
+        
+        # 读取数据
+        for i, mol in tqdm(enumerate(suppl), desc="Processing data", total=len(suppl)):
+            if mol is None:
+                continue
+            
+            # 提取碳谱数据
+            carbon_shift = ExtractCarbonShift(mol)
+            
+            mask, shift = GernerateCarbonMask(mol, carbon_shift)
+            
+            data = Data()
+            
+            # 提取分子图
+            graph = MolToGraph(mol)
+            finger_print = MolToFingerprints(mol)
+            smiles = Chem.MolToSmiles(mol, isomericSmiles=True)
+            smiles_vector = GenerateSequentialSmiles(smiles)
+            
+            data.__num_nodes__ = int(graph["num_nodes"])
+            data.edge_index = torch.from_numpy(graph["edge_index"]).to(torch.int64)
+            data.edge_attr = torch.from_numpy(graph["edge_feat"]).to(torch.int64)
+            data.x = torch.from_numpy(graph["node_feat"]).to(torch.int64)
+            data.y = torch.tensor(shift, dtype=torch.float32)
+            data.z = torch.tensor(graph["z"], dtype=torch.int64)
+            data.smiles_vector = torch.tensor(smiles_vector, dtype=torch.int64)
+            data.fingerprint = torch.tensor(finger_print, dtype=torch.int64)
+            data.mask = torch.tensor(mask, dtype=torch.bool)
+            data.smiles = smiles
+
+            data_list.append(data)
+            
+        torch.save(self.collate(data_list), self.processed_paths[0])
+
+

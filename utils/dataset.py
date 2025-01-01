@@ -1,9 +1,10 @@
+import ast
 import numpy as np
 
 from rdkit import Chem
 from rdkit import RDLogger
 from rdkit.Chem import AllChem
-from pubchemfp import GetPubChemFPs
+from utils.pubchemfp import GetPubChemFPs
 
 
 # Disable rdkit warnings
@@ -53,6 +54,8 @@ ALLOWED_BONDS = {
         'STEREOCIS',
         'STEREOTRANS',
         'STEREOANY',
+        'STEREOATROPCW',
+        'STEREOATROPCCW'
     ],
     'is_conjugated_list': [False, True],
     'is_in_ring_list': [False, True],
@@ -156,6 +159,42 @@ def ExtractMolData(mol):
     mol_id = mol_props['nmrshiftdb2 ID']
 
     return {'smiles': smi, 'mol_id': mol_id}
+
+
+def GernerateCarbonMask(mol, shift_dict):
+    r"""
+    生成 13C 化学位移掩码
+    """
+    for j, atom in enumerate(mol.GetAtoms()):
+        if j in shift_dict:
+            atom.SetProp('shift', str(shift_dict[j]))
+            atom.SetBoolProp('mask', True)
+        else:
+            atom.SetProp('shift', str(0))
+            atom.SetBoolProp('mask', False)
+
+    mask = np.array([atom.GetBoolProp('mask') for atom in mol.GetAtoms()])
+    shift = np.array([ast.literal_eval(atom.GetProp('shift')) for atom in mol.GetAtoms()])
+    
+    return mask, shift
+
+
+def GernerateHydrogenMask(mol, shift_dict):
+    r"""
+    生成 1H 化学位移掩码
+    """
+    for j, atom in enumerate(mol.GetAtoms()):
+        if j in shift_dict:
+            atom.SetProp('shift', str(shift_dict[j]))
+            atom.SetBoolProp('mask', True)
+        else:
+            atom.SetProp('shift', str([0]))             
+            atom.SetBoolProp('mask', False)
+
+    mask = np.array([atom.GetBoolProp('mask') for atom in mol.GetAtoms()])
+    shift = np.array([ast.literal_eval(atom.GetProp('shift')) for atom in mol.GetAtoms()])
+    
+    return mask, shift
 
 
 def SafeIndex(allowed_list, element):
@@ -264,14 +303,17 @@ def GenerateSequentialSmiles(smile):
     r"""
     序列化 SMILES 字符串
     """
-    smi_to_seq = "(.02468@BDFHLNPRTVZ/bdfhlnprt#*%)+-/13579=ACEGIKMOSUWY[]acegimosuy\\"
-    seq_dict_smi = {v: (i + 1) for i, v in enumerate(smi_to_seq)}  ## 对照字典，通过循环得到每个字符对应的index
-    max_seq_smi_len = 100
-    
-    x = np.zeros(shape=max_seq_smi_len)
-    for i, ch in enumerate(smile[:max_seq_smi_len]):
-        x[i] = seq_dict_smi[ch]
+    try:
+        smi_to_seq = "(.02468@BDFHLNPRTVZ/bdfhlnprt#*%)+-/13579=ACEGIKMOSUWY[]acegimosuy\\"
+        seq_dict_smi = {v: (i + 1) for i, v in enumerate(smi_to_seq)}  ## 对照字典，通过循环得到每个字符对应的 index
+        max_seq_smi_len = 100
         
+        x = np.zeros(shape=max_seq_smi_len)
+        for i, ch in enumerate(smile[:max_seq_smi_len]):
+            x[i] = seq_dict_smi[ch]
+    except:
+        print(smile)
+                
     return np.array(x)
 
 
@@ -291,16 +333,3 @@ def MolToFingerprints(mol):
     return np.array(fp)
 
 
-if __name__ == '__main__':
-    # 读取分子数据
-    mol = Chem.MolFromSmiles('CCO')
-    # 将分子转换为图数据
-    graph = MolToGraph(mol)
-    fingerprint = MolToFingerprints(mol)
-    print(graph)
-    print(len(fingerprint))
-    
-    # 绘制 RDKit 分子对象
-    from rdkit.Chem import Draw
-    img = Draw.MolToImage(mol)
-    img.show()

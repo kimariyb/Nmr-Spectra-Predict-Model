@@ -1,1 +1,1 @@
-# Nmr-Spectra-Predict-Model
+# NMR Spectra Predict Model
