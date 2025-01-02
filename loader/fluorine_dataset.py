@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-
+import re
 import os
 import torch
 
@@ -9,7 +9,7 @@ from tqdm import tqdm
 from torch_geometric.data import Data, InMemoryDataset
 
 from utils.dataset import (
-    ExtractCarbonShift, 
+    ExtractFluorineShift, 
     MolToGraph, 
     MolToFingerprints, 
     GenerateSequentialSmiles,
@@ -21,7 +21,7 @@ from utils.dataset import (
 RDLogger.DisableLog('rdApp.*')
 
 
-class CarbonSpectraDataset(InMemoryDataset):
+class FluorineSpectraDataset(InMemoryDataset):
     def __init__(
         self, 
         root = None, 
@@ -31,7 +31,7 @@ class CarbonSpectraDataset(InMemoryDataset):
     ):
         self.root = root
     
-        super(CarbonSpectraDataset, self).__init__(
+        super(FluorineSpectraDataset, self).__init__(
             root, transform, pre_transform, pre_filter
         )
         
@@ -43,7 +43,7 @@ class CarbonSpectraDataset(InMemoryDataset):
 
     @property
     def processed_file_names(self):
-        return 'nmr_13C_data_processed.pt'
+        return 'nmr_19F_data_processed.pt'
 
     @property
     def raw_dir(self):
@@ -61,17 +61,28 @@ class CarbonSpectraDataset(InMemoryDataset):
             sanitize = True
         )
         
+        fluorine_mols = []
+        pattern = re.compile(r'Spectrum 19F(\s[0-9])?')
+        # 如果分子中包含氟原子，则加入到列表中
+        for mol in tqdm(suppl, desc="Searching 19F data", total=len(suppl)):
+            if mol is not None and mol.GetNumAtoms() > 0:
+                # 如果所有的 keys 中 有 'Spectrum 19F' 字符串，则加入到列表中
+                if any(pattern.search(key) for key in mol.GetPropsAsDict().keys()):
+                    fluorine_mols.append(mol)
+                    print(f"Find a molecule with fluorine atoms.")
+            else:
+                continue
+     
+        print(f"Total {len(fluorine_mols)} molecules with fluorine atoms.")
+
         data_list = []
         
         # 读取数据
-        for i, mol in tqdm(enumerate(suppl), desc="Processing data", total=len(suppl)):
-            if mol is None:
-                continue
+        for i, mol in tqdm(enumerate(fluorine_mols), desc="Processing data", total=len(fluorine_mols)):
+            # 提取氟谱数据
+            fluorine_shift = ExtractFluorineShift(mol)
             
-            # 提取碳谱数据
-            carbon_shift = ExtractCarbonShift(mol)
-            
-            mask, shift = GernerateMask(mol, carbon_shift)
+            mask, shift = GernerateMask(mol, fluorine_shift)
             
             data = Data()
             

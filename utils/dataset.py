@@ -4,6 +4,7 @@ import numpy as np
 from rdkit import Chem
 from rdkit import RDLogger
 from rdkit.Chem import AllChem
+
 from utils.pubchemfp import GetPubChemFPs
 
 
@@ -148,6 +149,38 @@ def ExtractHydrogenShift(mol):
     return atom_shifts
 
 
+def ExtractFluorineShift(mol):
+    r"""
+    提取 19F 化学位移信息
+    """
+    # 获取分子的属性字典
+    mol_props = mol.GetPropsAsDict()
+    atom_shifts = {}
+    
+    # 遍历所有属性键
+    for key in mol_props.keys():
+        # 找到以 'Spectrum 19F' 开头的属性
+        if key.startswith('Spectrum 19F'):
+            # 分割属性值，获取每个化学位移信息
+            for shift in mol_props[key].split('|')[:-1]:
+                # 分割化学位移值、未知字段和原子索引
+                [shift_val, _, shift_idx] = shift.split(';')
+                shift_val, shift_idx = float(shift_val), int(shift_idx)
+                # 如果原子索引不在字典中，初始化为空列表
+                if shift_idx not in atom_shifts: 
+                    atom_shifts[shift_idx] = []
+                    
+                # 将化学位移值添加到对应原子索引的列表中
+                atom_shifts[shift_idx].append(shift_val)
+                
+    # 对每个原子索引，计算化学位移值的中位数
+    for j in range(mol.GetNumAtoms()):
+        if j in atom_shifts:
+            atom_shifts[j] = np.median(atom_shifts[j])
+    
+    return atom_shifts
+
+
 def ExtractMolData(mol):
     r"""
     提取 SMILES 字符串和分子编号
@@ -161,9 +194,9 @@ def ExtractMolData(mol):
     return {'smiles': smi, 'mol_id': mol_id}
 
 
-def GernerateCarbonMask(mol, shift_dict):
+def GernerateMask(mol, shift_dict):
     r"""
-    生成 13C 化学位移掩码
+    生成 13C、19F 等杂核化学位移掩码
     """
     for j, atom in enumerate(mol.GetAtoms()):
         if j in shift_dict:
@@ -199,8 +232,7 @@ def GernerateHydrogenMask(mol, shift_dict):
 
 def SafeIndex(allowed_list, element):
     r"""
-    Return index of element e in list l. 
-    If e is not present, return the last index
+    获取元素在允许列表中的索引
     
     Parameters
     ----------  
@@ -294,7 +326,6 @@ def MolToGraph(mol):
     graph["edge_feat"] = edge_attr
     graph["node_feat"] = x
     graph["num_nodes"] = len(x)
-    graph["z"] = z
     
     return graph
 
